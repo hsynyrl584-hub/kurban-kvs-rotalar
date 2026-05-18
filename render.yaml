@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: kurban-kvs-rotalar
+    env: node
+    buildCommand: cd backend && npm install && npm run build
+    startCommand: cd backend && node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
