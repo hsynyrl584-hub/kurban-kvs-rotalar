@@ -126,3 +126,17 @@ routeOptimizationRouter.post('/customers/optimize', async (req: Request, res: Re
 routeOptimizationRouter.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'OK', timestamp: new Date() });
 });
+
+// GET /api/debug - API key kontrolü
+routeOptimizationRouter.get('/debug', async (_req: Request, res: Response) => {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  const keyStatus = key ? `SET (${key.length} chars, starts: ${key.substring(0,8)}...)` : 'NOT SET';
+
+  let geocodeTest = 'not tested';
+  if (key) {
+    const result = await geocodeAddress('Kadıköy İstanbul');
+    geocodeTest = result ? `OK (${result.lat}, ${result.lng})` : 'FAILED - check logs';
+  }
+
+  res.json({ keyStatus, geocodeTest });
+});
