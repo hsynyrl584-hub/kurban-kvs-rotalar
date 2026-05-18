@@ -3,7 +3,7 @@ services:
     name: kurban-kvs-rotalar
     env: node
     buildCommand: cd backend && npm install && npm run build
-    startCommand: cd backend && node dist/index.js
+    startCommand: node backend/dist/index.js
     envVars:
       - key: NODE_ENV
         value: production

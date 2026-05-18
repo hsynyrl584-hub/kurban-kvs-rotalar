@@ -21,8 +21,9 @@ app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK', timestamp: new Date() });
 });
 
-// Frontend dosyalarını servis et (hem local hem ngrok/deploy için)
-const frontendPath = path.join(__dirname, '../../frontend');
+// Frontend dosyalarını servis et
+// __dirname: backend/dist → ../../frontend = proje kökü/frontend
+const frontendPath = path.resolve(__dirname, '..', '..', 'frontend');
 app.use(express.static(frontendPath));
 
 // SPA fallback
