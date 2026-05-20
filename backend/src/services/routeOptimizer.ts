@@ -61,19 +61,43 @@ function isTight(stops: Stop[]): boolean {
 // Küme mantıklı mı? Çap > MAX_DIAMETER_KM ise çok geniş alana yayılmış demektir
 const MAX_DIAMETER_KM = 8;
 
+// --- Boğaz geçiş cezası ---
+// Aynı yakada değilse mesafeye eklenen ceza (km)
+// Bu sayede K-Means iki yakayı ayrı araçlara atar
+const BOSPHORUS_LNG = 29.02;  // Boğaz'ın yaklaşık boylamı
+const BOSPHORUS_PENALTY_KM = 30;
+
+function effectiveDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const base = haversineDistance(lat1, lng1, lat2, lng2);
+  const p1Asian = lng1 >= BOSPHORUS_LNG;
+  const p2Asian = lng2 >= BOSPHORUS_LNG;
+  return p1Asian !== p2Asian ? base + BOSPHORUS_PENALTY_KM : base;
+}
+
+// --- Depot (başlangıç noktası) ---
+interface Depot { lat: number; lng: number; }
+
 // --- Nearest Neighbor rota optimizasyonu ---
 
-function nearestNeighborRoute(stops: Stop[]): { route: number[]; distance: number } {
+function nearestNeighborRoute(stops: Stop[], depot?: Depot): { route: number[]; distance: number } {
   if (stops.length === 0) return { route: [], distance: 0 };
   if (stops.length === 1) return { route: [stops[0].id], distance: 0 };
 
-  // Merkeze en uzak noktadan başla — daha iyi turlar üretir
-  const c = centroid(stops);
+  // Depot varsa ona en yakın duraktan başla, yoksa merkeze en uzak noktadan
   let startIdx = 0;
-  let maxDist = -1;
-  for (let i = 0; i < stops.length; i++) {
-    const d = haversineDistance(stops[i].latitude, stops[i].longitude, c.lat, c.lng);
-    if (d > maxDist) { maxDist = d; startIdx = i; }
+  if (depot) {
+    let minDist = Infinity;
+    for (let i = 0; i < stops.length; i++) {
+      const d = haversineDistance(stops[i].latitude, stops[i].longitude, depot.lat, depot.lng);
+      if (d < minDist) { minDist = d; startIdx = i; }
+    }
+  } else {
+    const c = centroid(stops);
+    let maxDist = -1;
+    for (let i = 0; i < stops.length; i++) {
+      const d = haversineDistance(stops[i].latitude, stops[i].longitude, c.lat, c.lng);
+      if (d > maxDist) { maxDist = d; startIdx = i; }
+    }
   }
 
   const visited = new Array(stops.length).fill(false);
@@ -147,14 +171,14 @@ function runKMeans(stops: Stop[], k: number, iterations = 12, seed = 42): Stop[]
     let farthestIdx = 0;
     for (let i = 0; i < shuffled.length; i++) {
       const minDist = Math.min(
-        ...centroids.map(c => haversineDistance(shuffled[i].latitude, shuffled[i].longitude, c.lat, c.lng))
+        ...centroids.map(c => effectiveDistance(shuffled[i].latitude, shuffled[i].longitude, c.lat, c.lng))
       );
       if (minDist > maxMinDist) { maxMinDist = minDist; farthestIdx = i; }
     }
     centroids.push({ lat: shuffled[farthestIdx].latitude, lng: shuffled[farthestIdx].longitude });
   }
 
-  // Orijinal sırayla atama yap
+  // Orijinal sırayla atama yap (Boğaz cezalı mesafe ile)
   const assigned = new Array(stops.length).fill(0);
 
   for (let iter = 0; iter < iterations; iter++) {
@@ -163,7 +187,7 @@ function runKMeans(stops: Stop[], k: number, iterations = 12, seed = 42): Stop[]
       let minDist = Infinity;
       let nearest = 0;
       for (let j = 0; j < k; j++) {
-        const d = haversineDistance(stops[i].latitude, stops[i].longitude, centroids[j].lat, centroids[j].lng);
+        const d = effectiveDistance(stops[i].latitude, stops[i].longitude, centroids[j].lat, centroids[j].lng);
         if (d < minDist) { minDist = d; nearest = j; }
       }
       if (assigned[i] !== nearest) { assigned[i] = nearest; changed = true; }
@@ -313,7 +337,7 @@ function balanceDistances(
 
 // --- Tek deneme (belirli seed ile) ---
 
-function runOnce(stops: Stop[], groupSize: number, seed: number): RouteGroup[] {
+function runOnce(stops: Stop[], groupSize: number, seed: number, depot?: Depot): RouteGroup[] {
   const SOFT_MAX = groupSize;
   const HARD_MAX = Math.ceil(groupSize * 1.4);
   const MIN_SIZE = 10;
@@ -330,7 +354,7 @@ function runOnce(stops: Stop[], groupSize: number, seed: number): RouteGroup[] {
   clusters = mergeSmallClusters(clusters, MIN_SIZE);
 
   return clusters.map((cluster, idx) => {
-    const { route, distance } = nearestNeighborRoute(cluster);
+    const { route, distance } = nearestNeighborRoute(cluster, depot);
     return { groupId: idx + 1, addresses: cluster, optimizedRoute: route, totalDistance: distance };
   });
 }
@@ -346,15 +370,15 @@ function balanceScore(groups: RouteGroup[]): number {
 
 // --- Ana export: N farklı seed dener, en dengeli sonucu döner ---
 
-export function optimizeRoutes(stops: Stop[], groupSize: number = 25, attempts = 5): RouteGroup[] {
+export function optimizeRoutes(stops: Stop[], groupSize: number = 25, attempts = 5, depot?: Depot): RouteGroup[] {
   if (stops.length === 0) return [];
 
   let best: RouteGroup[] | null = null;
   let bestScore = Infinity;
 
   for (let i = 0; i < attempts; i++) {
-    const seed = Date.now() + i * 9973; // her çağrıda farklı seed
-    const result = runOnce(stops, groupSize, seed);
+    const seed = Date.now() + i * 9973;
+    const result = runOnce(stops, groupSize, seed, depot);
     const score = balanceScore(result);
     if (score < bestScore) {
       bestScore = score;

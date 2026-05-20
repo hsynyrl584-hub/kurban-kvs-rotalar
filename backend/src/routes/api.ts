@@ -24,7 +24,12 @@ interface GeocodedStop {
 // Body: { customers: Customer[], groupSize?: number }
 routeOptimizationRouter.post('/customers/optimize', async (req: Request, res: Response) => {
   try {
-    const { customers, groupSize = 25, attempts = 5 } = req.body;
+    const {
+      customers,
+      groupSize = 25,
+      attempts = 5,
+      depotAddress = 'Ramazanoğlu Sanayi Cd. N:2 Pendik İstanbul',
+    } = req.body;
 
     if (!Array.isArray(customers) || customers.length === 0) {
       return res.status(400).json({ error: 'Geçerli müşteri listesi gerekli' });
@@ -78,8 +83,12 @@ routeOptimizationRouter.post('/customers/optimize', async (req: Request, res: Re
       });
     }
 
+    // Depot geocode et (başlangıç noktası)
+    const depotCoords = await geocodeAddress(depotAddress);
+    const depot = depotCoords ? { lat: depotCoords.lat, lng: depotCoords.lng } : undefined;
+
     // Rota optimizasyonu (N deneme, en dengeli sonuç)
-    const optimizedRoutes = optimizeRoutes(geocodedStops, groupSize, Math.min(Math.max(1, attempts), 10));
+    const optimizedRoutes = optimizeRoutes(geocodedStops, groupSize, Math.min(Math.max(1, attempts), 10), depot);
 
     // Durakları müşteri listeleriyle birleştir
     const routes = optimizedRoutes.map((group) => {
