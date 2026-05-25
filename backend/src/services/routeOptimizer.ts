@@ -12,6 +12,7 @@ interface RouteGroup {
   addresses: Stop[];
   optimizedRoute: number[];
   totalDistance: number;
+  side?: 'Anadolu' | 'Avrupa';
 }
 
 // --- Yardımcı fonksiyonlar ---
@@ -368,9 +369,9 @@ function balanceScore(groups: RouteGroup[]): number {
   return max === 0 ? 0 : (max - min) / max;
 }
 
-// --- Ana export: N farklı seed dener, en dengeli sonucu döner ---
+// --- Tek yaka için N deneme, en dengeli sonucu döner ---
 
-export function optimizeRoutes(stops: Stop[], groupSize: number = 25, attempts = 5, depot?: Depot): RouteGroup[] {
+function optimizeSide(stops: Stop[], groupSize: number, attempts: number, depot: Depot | undefined, side: 'Anadolu' | 'Avrupa'): RouteGroup[] {
   if (stops.length === 0) return [];
 
   let best: RouteGroup[] | null = null;
@@ -386,7 +387,25 @@ export function optimizeRoutes(stops: Stop[], groupSize: number = 25, attempts =
     }
   }
 
-  return (best || []).map((g, idx) => ({ ...g, groupId: idx + 1 }));
+  return (best || []).map(g => ({ ...g, side }));
+}
+
+// --- Ana export: Anadolu ve Avrupa yakasını kesin olarak ayırır ---
+
+export function optimizeRoutes(stops: Stop[], groupSize: number = 25, attempts = 5, depot?: Depot): RouteGroup[] {
+  if (stops.length === 0) return [];
+
+  // Boğaz boylamına göre kesin ayrım
+  const anadoluStops = stops.filter(s => s.longitude >= BOSPHORUS_LNG);
+  const avrupaStops  = stops.filter(s => s.longitude <  BOSPHORUS_LNG);
+
+  // Depot Pendik'te (Anadolu yakası) — Avrupa için depot kullanma
+  const anadoluRoutes = optimizeSide(anadoluStops, groupSize, attempts, depot, 'Anadolu');
+  const avrupaRoutes  = optimizeSide(avrupaStops,  groupSize, attempts, undefined, 'Avrupa');
+
+  // Önce Anadolu, sonra Avrupa; ardışık groupId ver
+  const combined = [...anadoluRoutes, ...avrupaRoutes];
+  return combined.map((g, idx) => ({ ...g, groupId: idx + 1 }));
 }
 
 // Geriye dönük uyumluluk

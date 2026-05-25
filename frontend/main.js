@@ -230,7 +230,7 @@ function displayResults(data) {
   titleEl.textContent = `${data.groups} Araç — ${data.totalCustomers} Müşteri`;
   resultsDiv.innerHTML = '';
 
-  // Km denge özeti
+  // Genel km denge özeti
   const distances = data.routes.map(r => parseFloat(r.totalDistance));
   const maxKm = Math.max(...distances);
   const minKm = Math.min(...distances);
@@ -239,76 +239,97 @@ function displayResults(data) {
   const balanceColor = balanceRatio < 20 ? '#137333' : balanceRatio < 35 ? '#b06000' : '#c5221f';
 
   const summaryDiv = document.createElement('div');
-  summaryDiv.style.cssText = 'background:#f8f9fa;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;';
+  summaryDiv.style.cssText = 'background:#f8f9fa;border-radius:6px;padding:10px 12px;margin-bottom:16px;font-size:12px;';
   summaryDiv.innerHTML = `
     <div style="display:flex;gap:16px;flex-wrap:wrap;">
-      <span>⬆ En uzun: <b>${maxKm.toFixed(1)} km</b></span>
-      <span>⬇ En kısa: <b>${minKm.toFixed(1)} km</b></span>
-      <span>∅ Ortalama: <b>${avgKm.toFixed(1)} km</b></span>
+      <span>En uzun: <b>${maxKm.toFixed(1)} km</b></span>
+      <span>En kısa: <b>${minKm.toFixed(1)} km</b></span>
+      <span>Ortalama: <b>${avgKm.toFixed(1)} km</b></span>
       <span style="color:${balanceColor}">Fark: <b>${balanceRatio}%</b></span>
     </div>
   `;
   resultsDiv.appendChild(summaryDiv);
 
-  data.routes.forEach((route) => {
-    const color = COLORS[(route.groupId - 1) % COLORS.length];
-    const totalCust = route.stops.reduce((s, st) => s + st.customers.length, 0);
-    const multiStops = route.stops.filter(st => st.customers.length > 1).length;
+  // Yakaya göre grupla
+  const sides = ['Anadolu', 'Avrupa'];
+  sides.forEach(side => {
+    const sideRoutes = data.routes.filter(r => r.side === side);
+    if (sideRoutes.length === 0) return;
 
-    const card = document.createElement('div');
-    card.className = 'route-card';
+    const sideCustomers = sideRoutes.reduce((s, r) => s + r.stops.reduce((a, st) => a + st.customers.length, 0), 0);
+    const sideColor = side === 'Anadolu' ? '#c0392b' : '#2980b9';
+    const sideEmoji = side === 'Anadolu' ? '🌏' : '🌍';
 
-    const stopsHTML = route.stops.map((stop, idx) => {
-      const n = stop.customers.length;
-      const badge = n > 1
-        ? `<span style="background:#e74c3c;color:white;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">${n} kişi</span>`
+    const header = document.createElement('div');
+    header.style.cssText = `background:${sideColor};color:white;border-radius:6px;padding:8px 14px;margin-bottom:8px;font-weight:700;font-size:14px;`;
+    header.textContent = `${sideEmoji} ${side} Yakası — ${sideRoutes.length} araç · ${sideCustomers} müşteri`;
+    resultsDiv.appendChild(header);
+
+    sideRoutes.forEach((route) => {
+      const color = COLORS[(route.groupId - 1) % COLORS.length];
+      const totalCust = route.stops.reduce((s, st) => s + st.customers.length, 0);
+      const multiStops = route.stops.filter(st => st.customers.length > 1).length;
+
+      const card = document.createElement('div');
+      card.className = 'route-card';
+
+      const stopsHTML = route.stops.map((stop, idx) => {
+        const n = stop.customers.length;
+        const badge = n > 1
+          ? `<span style="background:#e74c3c;color:white;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px">${n} kişi</span>`
+          : '';
+
+        const customerRows = stop.customers.map(c => `
+          <div class="customer-row">
+            <span class="customer-name">${c.isim}</span>
+            <span class="customer-phones">${[c.tel1, c.tel2].filter(Boolean).join(' / ')}</span>
+          </div>
+        `).join('');
+
+        return `
+          <div class="stop-item">
+            <div class="stop-header">
+              <div class="stop-order">${idx + 1}</div>
+              <div class="stop-address">${stop.adres}${badge}</div>
+            </div>
+            ${customerRows}
+          </div>
+        `;
+      }).join('');
+
+      const mapsUrl = buildGoogleMapsUrl(route.stops);
+      const multiNote = multiStops > 0
+        ? ` · <span style="color:#e74c3c">${multiStops} adreste birden fazla kişi</span>`
         : '';
 
-      const customerRows = stop.customers.map(c => `
-        <div class="customer-row">
-          <span class="customer-name">${c.isim}</span>
-          <span class="customer-phones">${[c.tel1, c.tel2].filter(Boolean).join(' / ')}</span>
-        </div>
-      `).join('');
-
-      return `
-        <div class="stop-item">
-          <div class="stop-header">
-            <div class="stop-order">${idx + 1}</div>
-            <div class="stop-address">${stop.adres}${badge}</div>
+      card.innerHTML = `
+        <div class="route-card-header" onclick="toggleRoute(this)">
+          <div class="route-title">
+            <div class="route-badge" style="background:${color}">${route.groupId}</div>
+            <div>
+              <div class="route-name">Araç ${route.groupId}</div>
+              <div class="route-meta">${totalCust} müşteri · ${route.stopCount} durak · ${route.totalDistance} km${multiNote}</div>
+            </div>
           </div>
-          ${customerRows}
+          <div class="route-toggle">▾</div>
+        </div>
+        <div class="route-maps-bar">
+          <a class="btn-maps" href="${mapsUrl}" target="_blank" onclick="event.stopPropagation()">
+            🗺 Google Maps'te Aç
+          </a>
+        </div>
+        <div class="route-stops">
+          ${stopsHTML}
         </div>
       `;
-    }).join('');
 
-    const mapsUrl = buildGoogleMapsUrl(route.stops);
-    const multiNote = multiStops > 0
-      ? ` · <span style="color:#e74c3c">${multiStops} adreste birden fazla kişi</span>`
-      : '';
+      resultsDiv.appendChild(card);
+    });
 
-    card.innerHTML = `
-      <div class="route-card-header" onclick="toggleRoute(this)">
-        <div class="route-title">
-          <div class="route-badge" style="background:${color}">${route.groupId}</div>
-          <div>
-            <div class="route-name">Araç ${route.groupId}</div>
-            <div class="route-meta">${totalCust} müşteri · ${route.stopCount} durak · ${route.totalDistance} km${multiNote}</div>
-          </div>
-        </div>
-        <div class="route-toggle">▾</div>
-      </div>
-      <div class="route-maps-bar">
-        <a class="btn-maps" href="${mapsUrl}" target="_blank" onclick="event.stopPropagation()">
-          🗺 Google Maps'te Aç
-        </a>
-      </div>
-      <div class="route-stops">
-        ${stopsHTML}
-      </div>
-    `;
-
-    resultsDiv.appendChild(card);
+    // Yakalar arası boşluk
+    const spacer = document.createElement('div');
+    spacer.style.height = '12px';
+    resultsDiv.appendChild(spacer);
   });
 }
 
@@ -378,7 +399,7 @@ function visualizeRoutes(routes) {
     legendItems.push(`
       <div class="legend-item">
         <div class="legend-dot" style="background:${color}"></div>
-        <span>Araç ${route.groupId} (${route.stopCount} durak)</span>
+        <span>Araç ${route.groupId} · ${route.side || ''} (${route.stopCount} durak)</span>
       </div>
     `);
   });

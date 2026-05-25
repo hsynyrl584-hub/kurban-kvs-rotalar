@@ -110,6 +110,7 @@ routeOptimizationRouter.post('/customers/optimize', async (req: Request, res: Re
 
       return {
         groupId: group.groupId,
+        side: group.side,
         stopCount: stops.length,
         customerCount: totalCustomers,
         totalDistance: group.totalDistance.toFixed(2),
