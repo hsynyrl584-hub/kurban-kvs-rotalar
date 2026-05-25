@@ -363,28 +363,62 @@ function balanceDistances(
   return result;
 }
 
-// --- Tek deneme (belirli seed ile) ---
+// --- Sektör tabanlı kümeleme ---
+// Depo veya referans noktasından her durağa açı hesaplanır.
+// Durağlar açısal sıraya göre araçlara dağıtılır: her araç ayrı bir dilim.
+// Bu yöntemle araçlar birbirinin bölgesine girmez (kesişme geometrik olarak
+// imkânsız hale gelir), çünkü her araç ayrı bir açı aralığından sorumludur.
 
-function runOnce(stops: Stop[], groupSize: number, seed: number, depot?: Depot): RouteGroup[] {
+function angleFromRef(refLat: number, refLng: number, lat: number, lng: number): number {
+  return Math.atan2(lng - refLng, lat - refLat); // -π .. +π
+}
+
+function sectorCluster(
+  stops: Stop[],
+  groupSize: number,
+  refLat: number,
+  refLng: number,
+  angleOffset: number,
+): Stop[][] {
+  if (stops.length === 0) return [];
+
   const SOFT_MAX = groupSize;
   const HARD_MAX = Math.ceil(groupSize * 1.4);
   const MIN_SIZE = 10;
 
-  const numClusters = Math.max(1, Math.ceil(stops.length / SOFT_MAX));
-  let clusters = runKMeans(stops, numClusters, 12, seed);
-
-  const split: Stop[][] = [];
-  for (const c of clusters) split.push(...splitCluster(c, SOFT_MAX, HARD_MAX, seed));
-  clusters = split;
-
-  clusters = mergeSmallClusters(clusters, MIN_SIZE);
-  clusters = balanceDistances(clusters, MIN_SIZE, SOFT_MAX, HARD_MAX);
-  clusters = mergeSmallClusters(clusters, MIN_SIZE);
-
-  return clusters.map((cluster, idx) => {
-    const { route, distance } = nearestNeighborRoute(cluster, depot);
-    return { groupId: idx + 1, addresses: cluster, optimizedRoute: route, totalDistance: distance };
+  // Referans noktasına göre açısal sırala (angleOffset ile sınır kaydırılır)
+  const sorted = [...stops].sort((a, b) => {
+    let aA = angleFromRef(refLat, refLng, a.latitude, a.longitude) + angleOffset;
+    let bA = angleFromRef(refLat, refLng, b.latitude, b.longitude) + angleOffset;
+    if (aA <= -Math.PI) aA += 2 * Math.PI;
+    if (bA <= -Math.PI) bA += 2 * Math.PI;
+    return aA - bA;
   });
+
+  const totalCust = totalCustomers(sorted);
+  const numVehicles = Math.max(1, Math.round(totalCust / SOFT_MAX));
+  const targetPerVehicle = totalCust / numVehicles;
+
+  // Sıralı durağları araçlara müşteri sayısına göre böl
+  const clusters: Stop[][] = [];
+  let current: Stop[] = [];
+  let currentCust = 0;
+
+  for (const stop of sorted) {
+    current.push(stop);
+    currentCust += stopCustomerCount(stop);
+    if (currentCust >= targetPerVehicle && clusters.length < numVehicles - 1) {
+      clusters.push(current);
+      current = [];
+      currentCust = 0;
+    }
+  }
+  if (current.length > 0) clusters.push(current);
+
+  // Aşırı büyük sektörleri böl, çok küçükleri komşuyla birleştir
+  const split: Stop[][] = [];
+  for (const c of clusters) split.push(...splitCluster(c, SOFT_MAX, HARD_MAX, 42));
+  return mergeSmallClusters(split, MIN_SIZE);
 }
 
 // Dengeleme skoru: araçlar arası km farkı oranı (düşük = daha dengeli)
@@ -397,20 +431,29 @@ function balanceScore(groups: RouteGroup[]): number {
 }
 
 // --- Tek yaka için N deneme, en dengeli sonucu döner ---
+// Her denemede sektör sınırları farklı açıdan başlar → en dengeli dağılım seçilir.
 
 function optimizeSide(stops: Stop[], groupSize: number, attempts: number, depot: Depot | undefined, side: 'Anadolu' | 'Avrupa'): RouteGroup[] {
   if (stops.length === 0) return [];
+
+  // Referans nokta: depo varsa depo (Pendik), yoksa merkez
+  const ref = depot ?? centroid(stops);
 
   let best: RouteGroup[] | null = null;
   let bestScore = Infinity;
 
   for (let i = 0; i < attempts; i++) {
-    const seed = Date.now() + i * 9973;
-    const result = runOnce(stops, groupSize, seed, depot);
-    const score = balanceScore(result);
+    // Her denemede sektör sınırı eşit aralıklarla kaydırılır
+    const offset = (i / attempts) * 2 * Math.PI;
+    const clusters = sectorCluster(stops, groupSize, ref.lat, ref.lng, offset);
+    const groups: RouteGroup[] = clusters.map((cluster, idx) => {
+      const { route, distance } = nearestNeighborRoute(cluster, depot);
+      return { groupId: idx + 1, addresses: cluster, optimizedRoute: route, totalDistance: distance };
+    });
+    const score = balanceScore(groups);
     if (score < bestScore) {
       bestScore = score;
-      best = result;
+      best = groups;
     }
   }
 
