@@ -266,7 +266,8 @@ function splitCluster(stops: Stop[], softMax: number, hardMax: number, seed = 42
 
 // --- Küçük kümeleri yakın komşuyla birleştir ---
 
-function mergeSmallClusters(clusters: Stop[][], minSize: number): Stop[][] {
+// maxSize: birleştirme sonrası bu limiti geçecek komşuya merge yapma
+function mergeSmallClusters(clusters: Stop[][], minSize: number, maxSize = Infinity): Stop[][] {
   const result = clusters.map(c => [...c]);
   let changed = true;
 
@@ -280,6 +281,8 @@ function mergeSmallClusters(clusters: Stop[][], minSize: number): Stop[][] {
     let minDist = Infinity;
     for (let i = 0; i < result.length; i++) {
       if (i === smallIdx) continue;
+      // Birleştirme sonrası maxSize'ı aşacaksa bu komşuyu atla
+      if (result[i].length + result[smallIdx].length > maxSize) continue;
       const d = haversineDistance(smallC.lat, smallC.lng, centroid(result[i]).lat, centroid(result[i]).lng);
       if (d < minDist) { minDist = d; nearestIdx = i; }
     }
@@ -288,6 +291,9 @@ function mergeSmallClusters(clusters: Stop[][], minSize: number): Stop[][] {
       result[nearestIdx] = [...result[nearestIdx], ...result[smallIdx]];
       result.splice(smallIdx, 1);
       changed = true;
+    } else {
+      // Hiçbir komşuya sığmıyor — küçük küme olduğu gibi kalır
+      break;
     }
   }
 
@@ -382,8 +388,8 @@ function sectorCluster(
   if (stops.length === 0) return [];
 
   const SOFT_MAX = groupSize;
-  const HARD_MAX = Math.ceil(groupSize * 1.4);
-  const MIN_SIZE = 10;
+  const HARD_MAX = groupSize; // sıkışık mahalle istisnası yok — limit kesin
+  const MIN_SIZE = Math.max(3, Math.floor(groupSize / 5));
 
   // Referans noktasına göre açısal sırala (angleOffset ile sınır kaydırılır)
   const sorted = [...stops].sort((a, b) => {
@@ -411,10 +417,15 @@ function sectorCluster(
   }
   if (current.length > 0) clusters.push(current);
 
-  // Aşırı büyük sektörleri böl, çok küçükleri komşuyla birleştir
+  // Aşırı büyük sektörleri böl, çok küçükleri komşuyla birleştir (SOFT_MAX aşılmaz)
   const split: Stop[][] = [];
   for (const c of clusters) split.push(...splitCluster(c, SOFT_MAX, HARD_MAX, 42));
-  return mergeSmallClusters(split, MIN_SIZE);
+  const merged = mergeSmallClusters(split, MIN_SIZE, SOFT_MAX);
+
+  // Son kontrol: birleştirme sonrası bile limit aşanları zorla böl
+  const final: Stop[][] = [];
+  for (const c of merged) final.push(...splitCluster(c, SOFT_MAX, HARD_MAX, 99));
+  return final;
 }
 
 // Dengeleme skoru: araçlar arası km farkı oranı (düşük = daha dengeli)
