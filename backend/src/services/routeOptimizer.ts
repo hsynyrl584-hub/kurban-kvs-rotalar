@@ -62,15 +62,37 @@ function isTight(stops: Stop[]): boolean {
 // Küme mantıklı mı? Çap > MAX_DIAMETER_KM ise çok geniş alana yayılmış demektir
 const MAX_DIAMETER_KM = 8;
 
-// --- Boğaz geçiş tespiti ---
-// Boğaz eğik bir çizgidir: güneyde ~29.01°E, kuzeyde ~29.09°E.
-// Düz boylam eşiği Üsküdar gibi sınır mahallelerini yanlış yakaya atar.
-// Formül iki bilinen noktadan türetildi:
-//   Üsküdar/Beşiktaş (41.04°N) → sınır boylamı ≈ 29.01
-//   Rumeli/Anadolu Hisarı (41.15°N) → sınır boylamı ≈ 29.09
-//   eğim = (29.09 - 29.01) / (41.15 - 41.04) ≈ 0.727
+// --- Boğaz geçiş tespiti (çok noktalı sınır çizgisi) ---
+// Boğaz tek bir doğru değil: güneyde dar ve batıda, Arnavutköy/Çengelköy
+// seviyesinde ani açılıp kuzeydoğuya dönüyor. Basit bir doğru Ortaköy,
+// Bebek, Arnavutköy gibi Avrupa kıyısı mahallelerini yanlış yakaya atar.
+// Her nokta Boğaz'ın orta çizgisini (iki kıyının ortası) temsil eder.
+const BOSPHORUS_MIDLINE: Array<[number, number]> = [
+  [40.85, 28.975],  // Marmara (Kadıköy güneyi)
+  [41.00, 28.993],  // Haydarpaşa / Sarayburnu
+  [41.04, 29.008],  // Beşiktaş / Üsküdar (dar kesim, ~1 km)
+  [41.048, 29.047], // Arnavutköy / Çengelköy (geniş kesim, ~2.5 km)
+  [41.075, 29.050], // Bebek / Kandilli
+  [41.09, 29.063],  // Rumeli Hisarı / Anadolu Hisarı
+  [41.15, 29.090],  // Sarıyer / Beykoz
+  [41.23, 29.145],  // Karadeniz girişi
+];
+
+function bosphorusBoundaryLng(lat: number): number {
+  const pts = BOSPHORUS_MIDLINE;
+  if (lat <= pts[0][0]) return pts[0][1];
+  if (lat >= pts[pts.length - 1][0]) return pts[pts.length - 1][1];
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (lat >= pts[i][0] && lat <= pts[i + 1][0]) {
+      const t = (lat - pts[i][0]) / (pts[i + 1][0] - pts[i][0]);
+      return pts[i][1] + t * (pts[i + 1][1] - pts[i][1]);
+    }
+  }
+  return pts[0][1];
+}
+
 function isAsianSide(lat: number, lng: number): boolean {
-  return lng > lat * 0.727 - 0.826;
+  return lng > bosphorusBoundaryLng(lat);
 }
 
 const BOSPHORUS_PENALTY_KM = 30;
