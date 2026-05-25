@@ -389,8 +389,9 @@ function angleFromRef(refLat: number, refLng: number, lat: number, lng: number):
   return Math.atan2(lng - refLng, lat - refLat); // -π .. +π
 }
 
-// groupSize : araç başına hedef adres (araç sayısını belirler)
-// splitMax  : bu sayıyı aşan sektörler bölünür (Anadolu = groupSize, Avrupa = çok yüksek → bölme yok)
+// groupSize   : araç başına hedef adres (araç sayısını belirler)
+// splitMax    : bu sayıyı aşan sektörler bölünür (Anadolu = groupSize, Avrupa = çok yüksek → bölme yok)
+// minVehicles : en az bu kadar araç oluşturulur
 function sectorCluster(
   stops: Stop[],
   groupSize: number,
@@ -398,6 +399,7 @@ function sectorCluster(
   refLat: number,
   refLng: number,
   angleOffset: number,
+  minVehicles: number = 1,
 ): Stop[][] {
   if (stops.length === 0) return [];
 
@@ -412,8 +414,8 @@ function sectorCluster(
     return aA - bA;
   });
 
-  // groupSize'a göre araç sayısı ve hedef hesapla
-  const numVehicles = Math.max(1, Math.ceil(sorted.length / groupSize));
+  // groupSize'a göre araç sayısı ve hedef hesapla (minVehicles alt sınırı)
+  const numVehicles = Math.max(minVehicles, Math.ceil(sorted.length / groupSize));
   const targetPerVehicle = sorted.length / numVehicles;
 
   // Sıralı durağları araçlara dağıt
@@ -449,8 +451,9 @@ function balanceScore(groups: RouteGroup[]): number {
 // --- Tek yaka için N deneme, en dengeli sonucu döner ---
 // Her denemede sektör sınırları farklı açıdan başlar → en dengeli dağılım seçilir.
 
-// splitMax: Anadolu için groupSize (sert limit), Avrupa için 999 (bölme yok)
-function optimizeSide(stops: Stop[], groupSize: number, splitMax: number, attempts: number, depot: Depot | undefined, side: 'Anadolu' | 'Avrupa'): RouteGroup[] {
+// splitMax   : Anadolu için groupSize (sert limit), Avrupa için 999 (bölme yok)
+// minVehicles: en az bu kadar araç oluşturulur
+function optimizeSide(stops: Stop[], groupSize: number, splitMax: number, minVehicles: number, attempts: number, depot: Depot | undefined, side: 'Anadolu' | 'Avrupa'): RouteGroup[] {
   if (stops.length === 0) return [];
 
   // Referans nokta: depo varsa depo (Pendik), yoksa merkez
@@ -462,7 +465,7 @@ function optimizeSide(stops: Stop[], groupSize: number, splitMax: number, attemp
   for (let i = 0; i < attempts; i++) {
     // Her denemede sektör sınırı eşit aralıklarla kaydırılır
     const offset = (i / attempts) * 2 * Math.PI;
-    const clusters = sectorCluster(stops, groupSize, splitMax, ref.lat, ref.lng, offset);
+    const clusters = sectorCluster(stops, groupSize, splitMax, ref.lat, ref.lng, offset, minVehicles);
     const groups: RouteGroup[] = clusters.map((cluster, idx) => {
       const { route, distance } = nearestNeighborRoute(cluster, depot);
       return { groupId: idx + 1, addresses: cluster, optimizedRoute: route, totalDistance: distance };
@@ -496,8 +499,8 @@ export function optimizeRoutes(
 
   // Anadolu: groupSize sert limit (splitMax = groupSize)
   // Avrupa: groupSize araç sayısını belirler ama sert bölme yok (splitMax = 999)
-  const anadoluRoutes = optimizeSide(anadoluStops, anadoluGroupSize, anadoluGroupSize, attempts, depot, 'Anadolu');
-  const avrupaRoutes  = optimizeSide(avrupaStops,  avrupaGroupSize,  999,              attempts, undefined, 'Avrupa');
+  const anadoluRoutes = optimizeSide(anadoluStops, anadoluGroupSize, anadoluGroupSize, 1, attempts, depot, 'Anadolu');
+  const avrupaRoutes  = optimizeSide(avrupaStops,  avrupaGroupSize,  999,              3, attempts, undefined, 'Avrupa');
 
   // Önce Anadolu, sonra Avrupa; ardışık groupId ver
   const combined = [...anadoluRoutes, ...avrupaRoutes];
