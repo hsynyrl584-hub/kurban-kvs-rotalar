@@ -26,7 +26,8 @@ routeOptimizationRouter.post('/customers/optimize', async (req: Request, res: Re
   try {
     const {
       customers,
-      groupSize = 25,
+      anadoluGroupSize = 25,
+      avrupaGroupSize = 20,
       attempts = 5,
       depotAddress = 'Ramazanoğlu Sanayi Cd. N:2 Pendik İstanbul',
     } = req.body;
@@ -88,7 +89,13 @@ routeOptimizationRouter.post('/customers/optimize', async (req: Request, res: Re
     const depot = depotCoords ? { lat: depotCoords.lat, lng: depotCoords.lng } : undefined;
 
     // Rota optimizasyonu (N deneme, en dengeli sonuç)
-    const optimizedRoutes = optimizeRoutes(geocodedStops, groupSize, Math.min(Math.max(1, attempts), 10), depot);
+    const optimizedRoutes = optimizeRoutes(
+      geocodedStops,
+      Math.min(Math.max(5, anadoluGroupSize), 50),
+      Math.min(Math.max(5, avrupaGroupSize), 50),
+      Math.min(Math.max(1, attempts), 10),
+      depot,
+    );
 
     // Durakları müşteri listeleriyle birleştir
     const routes = optimizedRoutes.map((group) => {

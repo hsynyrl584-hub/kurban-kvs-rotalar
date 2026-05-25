@@ -234,32 +234,31 @@ function runKMeans(stops: Stop[], k: number, iterations = 12, seed = 42): Stop[]
 
 // --- Büyük kümeleri böl (sıkışık alanlar için esneklik) ---
 
+// softMax/hardMax = max durak (adres) sayısı
 function splitCluster(stops: Stop[], softMax: number, hardMax: number, seed = 42): Stop[][] {
   if (stops.length <= 1) return [stops];
 
-  const custCount = totalCustomers(stops);
-  const diameter = stops.length >= 2 ? clusterDiameter(stops) : 0;
+  const stopCount = stops.length;
+  const diameter = stopCount >= 2 ? clusterDiameter(stops) : 0;
 
-  // Coğrafi olarak çok geniş alanı kaplamıyorsa ve müşteri limiti aşılmıyorsa bölme
-  const tooManyCustomers = custCount > softMax;
+  const tooMany = stopCount > softMax;
   const tooWide = diameter > MAX_DIAMETER_KM;
 
-  if (!tooManyCustomers && !tooWide) return [stops];
+  if (!tooMany && !tooWide) return [stops];
 
-  // Sıkışık mahalle ve hardMax altındaysa bölme (aynı bölge fazla müşteri olabilir)
-  if (custCount <= hardMax && isTight(stops)) return [stops];
+  // Sıkışık mahalle (yarıçap ≤ 2km) ve hardMax altındaysa bölme
+  if (stopCount <= hardMax && isTight(stops)) return [stops];
 
-  // Kaç parçaya böleceğimizi belirle: müşteri sayısına ve coğrafi genişliğe göre
-  const byCustomers = Math.ceil(custCount / softMax);
+  const byStops = Math.ceil(stopCount / softMax);
   const byDiameter = tooWide ? Math.ceil(diameter / MAX_DIAMETER_KM) : 1;
-  const numParts = Math.min(Math.max(2, byCustomers, byDiameter), stops.length);
+  const numParts = Math.min(Math.max(2, byStops, byDiameter), stopCount);
   if (numParts <= 1) return [stops];
 
   const subClusters = runKMeans(stops, numParts, 12, seed);
 
   const result: Stop[][] = [];
   for (const sub of subClusters) {
-    if (sub.length === stops.length) { result.push(sub); continue; } // sonsuz döngü koruması
+    if (sub.length === stops.length) { result.push(sub); continue; }
     result.push(...splitCluster(sub, softMax, hardMax, seed + 1));
   }
   return result;
@@ -273,7 +272,7 @@ function mergeSmallClusters(clusters: Stop[][], minSize: number): Stop[][] {
 
   while (changed) {
     changed = false;
-    const smallIdx = result.findIndex(c => totalCustomers(c) < minSize);
+    const smallIdx = result.findIndex(c => c.length < minSize);
     if (smallIdx === -1) break;
 
     const smallC = centroid(result[smallIdx]);
@@ -395,22 +394,19 @@ function sectorCluster(
     return aA - bA;
   });
 
-  const totalCust = totalCustomers(sorted);
-  const numVehicles = Math.max(1, Math.round(totalCust / SOFT_MAX));
-  const targetPerVehicle = totalCust / numVehicles;
+  // Durak (adres) sayısına göre araç sayısı ve hedef
+  const numVehicles = Math.max(1, Math.ceil(sorted.length / SOFT_MAX));
+  const targetPerVehicle = sorted.length / numVehicles;
 
-  // Sıralı durağları araçlara müşteri sayısına göre böl
+  // Sıralı durağları araçlara durak sayısına göre böl
   const clusters: Stop[][] = [];
   let current: Stop[] = [];
-  let currentCust = 0;
 
-  for (const stop of sorted) {
-    current.push(stop);
-    currentCust += stopCustomerCount(stop);
-    if (currentCust >= targetPerVehicle && clusters.length < numVehicles - 1) {
+  for (let i = 0; i < sorted.length; i++) {
+    current.push(sorted[i]);
+    if (current.length >= targetPerVehicle && clusters.length < numVehicles - 1) {
       clusters.push(current);
       current = [];
-      currentCust = 0;
     }
   }
   if (current.length > 0) clusters.push(current);
@@ -461,8 +457,16 @@ function optimizeSide(stops: Stop[], groupSize: number, attempts: number, depot:
 }
 
 // --- Ana export: Anadolu ve Avrupa yakasını kesin olarak ayırır ---
+// anadoluGroupSize: Anadolu yakası araç başına max durak sayısı (default 25)
+// avrupaGroupSize:  Avrupa yakası araç başına max durak sayısı (default 20)
 
-export function optimizeRoutes(stops: Stop[], groupSize: number = 25, attempts = 5, depot?: Depot): RouteGroup[] {
+export function optimizeRoutes(
+  stops: Stop[],
+  anadoluGroupSize: number = 25,
+  avrupaGroupSize: number = 20,
+  attempts = 5,
+  depot?: Depot,
+): RouteGroup[] {
   if (stops.length === 0) return [];
 
   // Boğaz eğimli çizgisine göre kesin yaka ayrımı
@@ -470,8 +474,8 @@ export function optimizeRoutes(stops: Stop[], groupSize: number = 25, attempts =
   const avrupaStops  = stops.filter(s => !isAsianSide(s.latitude, s.longitude));
 
   // Depot Pendik'te (Anadolu yakası) — Avrupa için depot kullanma
-  const anadoluRoutes = optimizeSide(anadoluStops, groupSize, attempts, depot, 'Anadolu');
-  const avrupaRoutes  = optimizeSide(avrupaStops,  groupSize, attempts, undefined, 'Avrupa');
+  const anadoluRoutes = optimizeSide(anadoluStops, anadoluGroupSize, attempts, depot, 'Anadolu');
+  const avrupaRoutes  = optimizeSide(avrupaStops,  avrupaGroupSize,  attempts, undefined, 'Avrupa');
 
   // Önce Anadolu, sonra Avrupa; ardışık groupId ver
   const combined = [...anadoluRoutes, ...avrupaRoutes];

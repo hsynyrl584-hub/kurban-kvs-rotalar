@@ -161,7 +161,8 @@ async function runOptimize() {
     return;
   }
 
-  const groupSize = parseInt(document.getElementById('groupSize').value) || 25;
+  const anadoluGroupSize = parseInt(document.getElementById('anadoluGroupSize').value) || 25;
+  const avrupaGroupSize  = parseInt(document.getElementById('avrupaGroupSize').value)  || 20;
   const uniqueCount = new Set(allCustomers.map(c => c.adres)).size;
 
   // Sonuçları temizle — yeni deneme görünür olsun
@@ -186,7 +187,7 @@ async function runOptimize() {
     const response = await fetch(`${API_URL}/customers/optimize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customers: allCustomers, groupSize, attempts: 5 }),
+      body: JSON.stringify({ customers: allCustomers, anadoluGroupSize, avrupaGroupSize, attempts: 5 }),
     });
 
     const data = await response.json();
