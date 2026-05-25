@@ -62,17 +62,22 @@ function isTight(stops: Stop[]): boolean {
 // Küme mantıklı mı? Çap > MAX_DIAMETER_KM ise çok geniş alana yayılmış demektir
 const MAX_DIAMETER_KM = 8;
 
-// --- Boğaz geçiş cezası ---
-// Aynı yakada değilse mesafeye eklenen ceza (km)
-// Bu sayede K-Means iki yakayı ayrı araçlara atar
-const BOSPHORUS_LNG = 29.02;  // Boğaz'ın yaklaşık boylamı
+// --- Boğaz geçiş tespiti ---
+// Boğaz eğik bir çizgidir: güneyde ~29.01°E, kuzeyde ~29.09°E.
+// Düz boylam eşiği Üsküdar gibi sınır mahallelerini yanlış yakaya atar.
+// Formül iki bilinen noktadan türetildi:
+//   Üsküdar/Beşiktaş (41.04°N) → sınır boylamı ≈ 29.01
+//   Rumeli/Anadolu Hisarı (41.15°N) → sınır boylamı ≈ 29.09
+//   eğim = (29.09 - 29.01) / (41.15 - 41.04) ≈ 0.727
+function isAsianSide(lat: number, lng: number): boolean {
+  return lng > lat * 0.727 - 0.826;
+}
+
 const BOSPHORUS_PENALTY_KM = 30;
 
 function effectiveDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const base = haversineDistance(lat1, lng1, lat2, lng2);
-  const p1Asian = lng1 >= BOSPHORUS_LNG;
-  const p2Asian = lng2 >= BOSPHORUS_LNG;
-  return p1Asian !== p2Asian ? base + BOSPHORUS_PENALTY_KM : base;
+  return isAsianSide(lat1, lng1) !== isAsianSide(lat2, lng2) ? base + BOSPHORUS_PENALTY_KM : base;
 }
 
 // --- Depot (başlangıç noktası) ---
@@ -395,9 +400,9 @@ function optimizeSide(stops: Stop[], groupSize: number, attempts: number, depot:
 export function optimizeRoutes(stops: Stop[], groupSize: number = 25, attempts = 5, depot?: Depot): RouteGroup[] {
   if (stops.length === 0) return [];
 
-  // Boğaz boylamına göre kesin ayrım
-  const anadoluStops = stops.filter(s => s.longitude >= BOSPHORUS_LNG);
-  const avrupaStops  = stops.filter(s => s.longitude <  BOSPHORUS_LNG);
+  // Boğaz eğimli çizgisine göre kesin yaka ayrımı
+  const anadoluStops = stops.filter(s => isAsianSide(s.latitude, s.longitude));
+  const avrupaStops  = stops.filter(s => !isAsianSide(s.latitude, s.longitude));
 
   // Depot Pendik'te (Anadolu yakası) — Avrupa için depot kullanma
   const anadoluRoutes = optimizeSide(anadoluStops, groupSize, attempts, depot, 'Anadolu');
