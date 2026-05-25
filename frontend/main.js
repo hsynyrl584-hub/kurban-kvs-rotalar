@@ -194,9 +194,11 @@ async function runOptimize() {
     if (!response.ok) throw new Error(data.error || 'Sunucu hatası');
 
     window._geocodeDone = true;
+    window._lastRouteData = data;
 
     displayResults(data);
     visualizeRoutes(data.routes);
+    document.getElementById('exportBtn').style.display = 'block';
 
     const failNote = data.failedAddresses > 0 ? ` (${data.failedAddresses} adres bulunamadı)` : '';
     showStatus(
@@ -429,6 +431,73 @@ function showStatus(message, type = 'info') {
   el.innerHTML = type === 'loading'
     ? `<span class="spinner"></span>${message}`
     : message;
+}
+
+// Excel export
+function exportToExcel() {
+  const data = window._lastRouteData;
+  if (!data) return;
+
+  const rows = [];
+
+  // Başlık satırı
+  rows.push(['Yaka', 'Araç No', 'Durak Sırası', 'Adres', 'Müşteri Adı', 'Tel 1', 'Tel 2']);
+
+  // Yakaya göre grupla: önce Anadolu, sonra Avrupa
+  ['Anadolu', 'Avrupa'].forEach(side => {
+    const sideRoutes = data.routes.filter(r => r.side === side);
+    if (sideRoutes.length === 0) return;
+
+    sideRoutes.forEach(route => {
+      // Araç başlık satırı (okunması kolaylaştırır)
+      const totalCust = route.stops.reduce((s, st) => s + st.customers.length, 0);
+      rows.push([
+        `── ${side} Yakası`,
+        `Araç ${route.groupId}`,
+        `${route.stopCount} durak`,
+        `${totalCust} müşteri`,
+        `${route.totalDistance} km`,
+        '',
+        '',
+      ]);
+
+      route.stops.forEach(stop => {
+        stop.customers.forEach(customer => {
+          rows.push([
+            side,
+            `Araç ${route.groupId}`,
+            stop.order,
+            stop.adres,
+            customer.isim,
+            customer.tel1 || '',
+            customer.tel2 || '',
+          ]);
+        });
+      });
+
+      // Araçlar arası boş satır
+      rows.push(['', '', '', '', '', '', '']);
+    });
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Sütun genişlikleri
+  ws['!cols'] = [
+    { wch: 12 },  // Yaka
+    { wch: 10 },  // Araç No
+    { wch: 12 },  // Durak Sırası
+    { wch: 55 },  // Adres
+    { wch: 28 },  // Müşteri Adı
+    { wch: 16 },  // Tel 1
+    { wch: 16 },  // Tel 2
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Rotalar');
+
+  const tarih = new Date().toLocaleDateString('tr-TR').replace(/\./g, '-');
+  XLSX.writeFile(wb, `kurban-rotalar-${tarih}.xlsx`);
 }
 
 // Başlangıç
