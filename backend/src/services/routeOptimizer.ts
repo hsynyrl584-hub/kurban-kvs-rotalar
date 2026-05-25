@@ -401,7 +401,7 @@ function sectorCluster(
 ): Stop[][] {
   if (stops.length === 0) return [];
 
-  const MIN_SIZE = 12; // bir araçta en az 12 adres olmalı
+  const MIN_SIZE = 10; // bir araçta en az 10 adres olmalı
 
   // Referans noktasına göre açısal sırala (angleOffset ile sınır kaydırılır)
   const sorted = [...stops].sort((a, b) => {
