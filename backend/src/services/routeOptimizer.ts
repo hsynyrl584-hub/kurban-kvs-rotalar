@@ -389,17 +389,18 @@ function angleFromRef(refLat: number, refLng: number, lat: number, lng: number):
   return Math.atan2(lng - refLng, lat - refLat); // -π .. +π
 }
 
+// groupSize : araç başına hedef adres (araç sayısını belirler)
+// splitMax  : bu sayıyı aşan sektörler bölünür (Anadolu = groupSize, Avrupa = çok yüksek → bölme yok)
 function sectorCluster(
   stops: Stop[],
   groupSize: number,
+  splitMax: number,
   refLat: number,
   refLng: number,
   angleOffset: number,
 ): Stop[][] {
   if (stops.length === 0) return [];
 
-  const SOFT_MAX = groupSize;
-  const HARD_MAX = groupSize;
   const MIN_SIZE = 12; // bir araçta en az 12 adres olmalı
 
   // Referans noktasına göre açısal sırala (angleOffset ile sınır kaydırılır)
@@ -411,11 +412,11 @@ function sectorCluster(
     return aA - bA;
   });
 
-  // Durak (adres) sayısına göre araç sayısı ve hedef
-  const numVehicles = Math.max(1, Math.ceil(sorted.length / SOFT_MAX));
+  // groupSize'a göre araç sayısı ve hedef hesapla
+  const numVehicles = Math.max(1, Math.ceil(sorted.length / groupSize));
   const targetPerVehicle = sorted.length / numVehicles;
 
-  // Sıralı durağları araçlara durak sayısına göre böl
+  // Sıralı durağları araçlara dağıt
   const clusters: Stop[][] = [];
   let current: Stop[] = [];
 
@@ -428,11 +429,12 @@ function sectorCluster(
   }
   if (current.length > 0) clusters.push(current);
 
-  // Aşırı büyük sektörleri böl, ardından küçükleri birleştir
-  // Not: merge sonrası re-split yapılmaz — min 12 kural max kuraldan önceliklidir
+  // splitMax'ı aşan sektörleri böl (Avrupa'da splitMax çok yüksek → pratikte bölünmez)
   const split: Stop[][] = [];
-  for (const c of clusters) split.push(...splitCluster(c, SOFT_MAX, HARD_MAX, 42));
-  return mergeSmallClusters(split, MIN_SIZE, SOFT_MAX);
+  for (const c of clusters) split.push(...splitCluster(c, splitMax, splitMax, 42));
+
+  // Min 12 garantisi — sığacak yer yoksa zorla birleştir, min kural önceliklidir
+  return mergeSmallClusters(split, MIN_SIZE, splitMax);
 }
 
 // Dengeleme skoru: araçlar arası km farkı oranı (düşük = daha dengeli)
@@ -447,7 +449,8 @@ function balanceScore(groups: RouteGroup[]): number {
 // --- Tek yaka için N deneme, en dengeli sonucu döner ---
 // Her denemede sektör sınırları farklı açıdan başlar → en dengeli dağılım seçilir.
 
-function optimizeSide(stops: Stop[], groupSize: number, attempts: number, depot: Depot | undefined, side: 'Anadolu' | 'Avrupa'): RouteGroup[] {
+// splitMax: Anadolu için groupSize (sert limit), Avrupa için 999 (bölme yok)
+function optimizeSide(stops: Stop[], groupSize: number, splitMax: number, attempts: number, depot: Depot | undefined, side: 'Anadolu' | 'Avrupa'): RouteGroup[] {
   if (stops.length === 0) return [];
 
   // Referans nokta: depo varsa depo (Pendik), yoksa merkez
@@ -459,7 +462,7 @@ function optimizeSide(stops: Stop[], groupSize: number, attempts: number, depot:
   for (let i = 0; i < attempts; i++) {
     // Her denemede sektör sınırı eşit aralıklarla kaydırılır
     const offset = (i / attempts) * 2 * Math.PI;
-    const clusters = sectorCluster(stops, groupSize, ref.lat, ref.lng, offset);
+    const clusters = sectorCluster(stops, groupSize, splitMax, ref.lat, ref.lng, offset);
     const groups: RouteGroup[] = clusters.map((cluster, idx) => {
       const { route, distance } = nearestNeighborRoute(cluster, depot);
       return { groupId: idx + 1, addresses: cluster, optimizedRoute: route, totalDistance: distance };
@@ -491,9 +494,10 @@ export function optimizeRoutes(
   const anadoluStops = stops.filter(s => isAsianSide(s.latitude, s.longitude));
   const avrupaStops  = stops.filter(s => !isAsianSide(s.latitude, s.longitude));
 
-  // Depot Pendik'te (Anadolu yakası) — Avrupa için depot kullanma
-  const anadoluRoutes = optimizeSide(anadoluStops, anadoluGroupSize, attempts, depot, 'Anadolu');
-  const avrupaRoutes  = optimizeSide(avrupaStops,  avrupaGroupSize,  attempts, undefined, 'Avrupa');
+  // Anadolu: groupSize sert limit (splitMax = groupSize)
+  // Avrupa: groupSize araç sayısını belirler ama sert bölme yok (splitMax = 999)
+  const anadoluRoutes = optimizeSide(anadoluStops, anadoluGroupSize, anadoluGroupSize, attempts, depot, 'Anadolu');
+  const avrupaRoutes  = optimizeSide(avrupaStops,  avrupaGroupSize,  999,              attempts, undefined, 'Avrupa');
 
   // Önce Anadolu, sonra Avrupa; ardışık groupId ver
   const combined = [...anadoluRoutes, ...avrupaRoutes];
