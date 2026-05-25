@@ -266,7 +266,9 @@ function splitCluster(stops: Stop[], softMax: number, hardMax: number, seed = 42
 
 // --- Küçük kümeleri yakın komşuyla birleştir ---
 
-// maxSize: birleştirme sonrası bu limiti geçecek komşuya merge yapma
+// minSize adresten az olan kümeleri birleştirir.
+// Önce maxSize'a uymaya çalışır; hiç komşu sığmıyorsa en yakın komşuya
+// zorla birleştirir (min kural max kuraldan daha önceliklidir).
 function mergeSmallClusters(clusters: Stop[][], minSize: number, maxSize = Infinity): Stop[][] {
   const result = clusters.map(c => [...c]);
   let changed = true;
@@ -279,21 +281,30 @@ function mergeSmallClusters(clusters: Stop[][], minSize: number, maxSize = Infin
     const smallC = centroid(result[smallIdx]);
     let nearestIdx = -1;
     let minDist = Infinity;
+
+    // 1. Tercih: maxSize'ı aşmayan en yakın komşu
     for (let i = 0; i < result.length; i++) {
       if (i === smallIdx) continue;
-      // Birleştirme sonrası maxSize'ı aşacaksa bu komşuyu atla
       if (result[i].length + result[smallIdx].length > maxSize) continue;
       const d = haversineDistance(smallC.lat, smallC.lng, centroid(result[i]).lat, centroid(result[i]).lng);
       if (d < minDist) { minDist = d; nearestIdx = i; }
+    }
+
+    // 2. Zorunlu fallback: hiç komşu sığmıyorsa limiti görmezden gel
+    //    (4 adreste araç bırakmak, 24 adresli araçtan daha kötüdür)
+    if (nearestIdx === -1) {
+      minDist = Infinity;
+      for (let i = 0; i < result.length; i++) {
+        if (i === smallIdx) continue;
+        const d = haversineDistance(smallC.lat, smallC.lng, centroid(result[i]).lat, centroid(result[i]).lng);
+        if (d < minDist) { minDist = d; nearestIdx = i; }
+      }
     }
 
     if (nearestIdx !== -1) {
       result[nearestIdx] = [...result[nearestIdx], ...result[smallIdx]];
       result.splice(smallIdx, 1);
       changed = true;
-    } else {
-      // Hiçbir komşuya sığmıyor — küçük küme olduğu gibi kalır
-      break;
     }
   }
 
@@ -388,8 +399,8 @@ function sectorCluster(
   if (stops.length === 0) return [];
 
   const SOFT_MAX = groupSize;
-  const HARD_MAX = groupSize; // sıkışık mahalle istisnası yok — limit kesin
-  const MIN_SIZE = Math.max(3, Math.floor(groupSize / 5));
+  const HARD_MAX = groupSize;
+  const MIN_SIZE = 12; // bir araçta en az 12 adres olmalı
 
   // Referans noktasına göre açısal sırala (angleOffset ile sınır kaydırılır)
   const sorted = [...stops].sort((a, b) => {
@@ -417,15 +428,11 @@ function sectorCluster(
   }
   if (current.length > 0) clusters.push(current);
 
-  // Aşırı büyük sektörleri böl, çok küçükleri komşuyla birleştir (SOFT_MAX aşılmaz)
+  // Aşırı büyük sektörleri böl, ardından küçükleri birleştir
+  // Not: merge sonrası re-split yapılmaz — min 12 kural max kuraldan önceliklidir
   const split: Stop[][] = [];
   for (const c of clusters) split.push(...splitCluster(c, SOFT_MAX, HARD_MAX, 42));
-  const merged = mergeSmallClusters(split, MIN_SIZE, SOFT_MAX);
-
-  // Son kontrol: birleştirme sonrası bile limit aşanları zorla böl
-  const final: Stop[][] = [];
-  for (const c of merged) final.push(...splitCluster(c, SOFT_MAX, HARD_MAX, 99));
-  return final;
+  return mergeSmallClusters(split, MIN_SIZE, SOFT_MAX);
 }
 
 // Dengeleme skoru: araçlar arası km farkı oranı (düşük = daha dengeli)
